@@ -1,0 +1,125 @@
+# docker-compose.staging.yml
+# Rigorously Hardened Staging Environment Mimicking Production Architecture
+
+version: "3.8"
+
+services:
+  # 1. Nginx Reverse Proxy / Load Balancer Edge Container
+  nginx-edge:
+    build:
+      context: ../../
+      dockerfile: devops/docker/Dockerfile.frontend
+    container_name: edros-staging-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - staging_ssl_certs:/etc/ssl/certs:ro
+      - staging_ssl_keys:/etc/ssl/private:ro
+    depends_on:
+      - edros-backend-1
+      - edros-backend-2
+    networks:
+      - staging_network
+
+  # 2. Backend Server Replica 1
+  edros-backend-1:
+    build:
+      context: ../../
+      dockerfile: devops/docker/Dockerfile.backend
+    container_name: edros-staging-backend-1
+    environment:
+      - NODE_ENV=staging
+      - PORT=3000
+      - DATABASE_URL=postgresql://edros_staging_user:stg_secure_pass_990@edros-db:5432/edros_staging?schema=public&connection_limit=15
+      - REDIS_HOST=edros-redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=edros_redis_staging_sec_9191
+      - JWT_SECRET=edros_staging_auth_jwt_system_secret_key
+      - AES_ENCRYPTION_KEY=staging_crypto_system_aes_key_32_bytes_len
+      - AWS_S3_BUCKET=edros-vault-staging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+    networks:
+      - staging_network
+
+  # 3. Backend Server Replica 2
+  edros-backend-2:
+    build:
+      context: ../../
+      dockerfile: devops/docker/Dockerfile.backend
+    container_name: edros-staging-backend-2
+    environment:
+      - NODE_ENV=staging
+      - PORT=3000
+      - DATABASE_URL=postgresql://edros_staging_user:stg_secure_pass_990@edros-db:5432/edros_staging?schema=public&connection_limit=15
+      - REDIS_HOST=edros-redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=edros_redis_staging_sec_9191
+      - JWT_SECRET=edros_staging_auth_jwt_system_secret_key
+      - AES_ENCRYPTION_KEY=staging_crypto_system_aes_key_32_bytes_len
+      - AWS_S3_BUCKET=edros-vault-staging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+    networks:
+      - staging_network
+
+  # 4. Background Queue Processor
+  edros-worker:
+    build:
+      context: ../../
+      dockerfile: devops/docker/Dockerfile.worker
+    container_name: edros-staging-worker
+    environment:
+      - NODE_ENV=staging
+      - DATABASE_URL=postgresql://edros_staging_user:stg_secure_pass_990@edros-db:5432/edros_staging?schema=public
+      - REDIS_HOST=edros-redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=edros_redis_staging_sec_9191
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+    networks:
+      - staging_network
+
+  # 5. Enterprise High-Availability Redis Configuration
+  edros-redis:
+    image: redis:7.2-alpine
+    container_name: edros-staging-redis
+    command: redis-server --appendonly yes --requirepass edros_redis_staging_sec_9191 --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_staging_data:/data
+    networks:
+      - staging_network
+
+  # 6. Isolated PostgreSQL Staging Database Server
+  edros-db:
+    image: postgres:15-alpine
+    container_name: edros-staging-db
+    environment:
+      POSTGRES_DB: edros_staging
+      POSTGRES_USER: edros_staging_user
+      POSTGRES_PASSWORD: stg_secure_pass_990
+    volumes:
+      - postgres_staging_data:/var/lib/postgresql/data
+    networks:
+      - staging_network
+
+networks:
+  staging_network:
+    driver: bridge
+
+volumes:
+  staging_ssl_certs:
+  staging_ssl_keys:
+  postgres_staging_data:
+  redis_staging_data:

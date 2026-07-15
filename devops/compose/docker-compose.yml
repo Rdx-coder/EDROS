@@ -1,0 +1,94 @@
+# docker-compose.yml
+# High-Fidelity Enterprise Development Environment for EDROS Operating System
+
+version: "3.8"
+
+services:
+  # 1. PostgreSQL Database Service
+  edros-db:
+    image: postgres:15-alpine
+    container_name: edros-dev-db
+    environment:
+      POSTGRES_DB: edros_dev
+      POSTGRES_USER: edros_admin
+      POSTGRES_PASSWORD: edros_dev_password_2026
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edros_admin -d edros_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Redis Distributed Cache & Queue Backend
+  edros-redis:
+    image: redis:7.2-alpine
+    container_name: edros-dev-redis
+    command: redis-server --appendonly yes --requirepass edros_redis_dev_secret_2026
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_dev_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "edros_redis_dev_secret_2026", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 3. Backend Core Express Application (Dev Hot-Reload Mode)
+  edros-backend:
+    build:
+      context: ../../
+      dockerfile: devops/docker/Dockerfile.backend
+      target: builder # Use compilation step for rich dev tools if needed
+    container_name: edros-dev-backend
+    volumes:
+      - ../../:/usr/src/app
+      - /usr/src/app/node_modules
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - DATABASE_URL=postgresql://edros_admin:edros_dev_password_2026@edros-db:5432/edros_dev?schema=public
+      - REDIS_HOST=edros-redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=edros_redis_dev_secret_2026
+      - JWT_SECRET=edros_super_secure_jwt_key_dev_2026
+      - AES_ENCRYPTION_KEY=32_byte_hexadecimal_dev_key_2026_!!
+      - AWS_S3_BUCKET=edros-audit-vault-dev
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    ports:
+      - "3000:3000"
+    depends_on:
+      edros-db:
+        condition: service_healthy
+      edros-redis:
+        condition: service_healthy
+
+  # 4. Background BullMQ Queue Worker
+  edros-worker:
+    build:
+      context: ../../
+      dockerfile: devops/docker/Dockerfile.worker
+    container_name: edros-dev-worker
+    volumes:
+      - ../../:/usr/src/app
+      - /usr/src/app/node_modules
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://edros_admin:edros_dev_password_2026@edros-db:5432/edros_dev?schema=public
+      - REDIS_HOST=edros-redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=edros_redis_dev_secret_2026
+    depends_on:
+      edros-db:
+        condition: service_healthy
+      edros-redis:
+        condition: service_healthy
+
+volumes:
+  postgres_dev_data:
+    driver: local
+  redis_dev_data:
+    driver: local

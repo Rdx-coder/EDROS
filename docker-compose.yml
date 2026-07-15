@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  # 1. EDROS Core Application Service
+  edros-core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: edros_core_app
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=postgresql://edros_admin:SecureAdminPassword2026@edros-db:5432/edros_prod?sslmode=disable
+      - REDIS_URL=redis://edros-cache:6379/0
+      - RATE_LIMIT_RPM=120
+      - SECURITY_ENCRYPTION_KEY=e8349fa8617cb7564d7df153ea30cb99
+      - LOG_LEVEL=INFO
+    depends_on:
+      edros-db:
+        condition: service_healthy
+      edros-cache:
+        condition: service_started
+    networks:
+      - edros-net
+
+  # 2. PostgreSQL Relational Engine (Domain Persistence)
+  edros-db:
+    image: postgres:16-alpine
+    container_name: edros_postgres_db
+    restart: always
+    environment:
+      - POSTGRES_USER=edros_admin
+      - POSTGRES_PASSWORD=SecureAdminPassword2026
+      - POSTGRES_DB=edros_prod
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edros_admin -d edros_prod"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - edros-net
+
+  # 3. Redis In-Memory Engine (Rate Limiting, Session & Cache Storage)
+  edros-cache:
+    image: redis:7.2-alpine
+    container_name: edros_redis_cache
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --requirepass SecureRedisPassword2026 --maxmemory 512mb --maxmemory-policy allkeys-lru
+    networks:
+      - edros-net
+
+networks:
+  edros-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

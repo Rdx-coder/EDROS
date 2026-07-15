@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edros-worker
+  namespace: edros-system
+  labels:
+    app: edros-worker
+    tier: batch
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: edros-worker
+  template:
+    metadata:
+      labels:
+        app: edros-worker
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+      containers:
+        - name: queue-worker
+          image: gcr.io/edros-enterprise/worker:v2.1.0
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          envFrom:
+            - configMapRef:
+                name: edros-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: edros-secrets
+                  key: DATABASE_URL
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: edros-secrets
+                  key: REDIS_PASSWORD

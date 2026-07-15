@@ -1,0 +1,68 @@
+groups:
+  - name: edros_observability_alerts
+    rules:
+      # 1. High REST API Latency Alert
+      - alert: EdrosHighApiLatency
+        expr: histogram_quantile(0.99, sum(rate(edros_http_request_duration_seconds_bucket[5m])) by (le, route)) > 0.5
+        for: 2m
+        labels:
+          severity: critical
+          tier: api
+        annotations:
+          summary: "Critical API Latency Spike on route {{ $labels.route }}"
+          description: "The 99th percentile of API execution latency has exceeded 500ms (currently {{ $value }}s) for the past 2 minutes."
+
+      # 2. High Error Rate Alert
+      - alert: EdrosHighErrorRate
+        expr: (sum(rate(edros_http_requests_total{status=~"5.."}[5m])) / sum(rate(edros_http_requests_total[5m]))) * 100 > 2
+        for: 1m
+        labels:
+          severity: critical
+          tier: api
+        annotations:
+          summary: "High API Error Rate Triggered"
+          description: "API HTTP 5xx error rate is currently {{ $value }}%, exceeding the maximum permissible SLA limit of 2%."
+
+      # 3. Redis Connection Loss Alert
+      - alert: EdrosRedisConnectionLoss
+        expr: edros_open_connections_count{target_service="redis"} == 0
+        for: 30s
+        labels:
+          severity: page
+          tier: database
+        annotations:
+          summary: "Redis Cache/Queue Node Down"
+          description: "No active connections detected to the Redis network instance. Caching and distributed queues are running in degraded memory-fallback configurations."
+
+      # 4. Database Pool Exhaustion Alert
+      - alert: EdrosDatabasePoolExhaustion
+        expr: edros_open_connections_count{target_service="postgresql"} > 90
+        for: 1m
+        labels:
+          severity: warning
+          tier: database
+        annotations:
+          summary: "Database Connection Pool Near Exhaustion"
+          description: "Prisma client PostgreSQL active connection count is currently {{ $value }}, exceeding 90% of pool capacity."
+
+      # 5. Dead Letter Queue (DLQ) Spikes Alert
+      - alert: EdrosDlqJobsSpike
+        expr: sum(increase(edros_job_failure_rate_total[5m])) > 5
+        for: 1m
+        labels:
+          severity: critical
+          tier: worker
+        annotations:
+          summary: "Dead Letter Queue Job Spike Detected"
+          description: "A sudden influx of background tasks ({{ $value }} jobs in the last 5 minutes) failed and were routed to the Dead Letter Queue (DLQ)."
+
+      # 6. Worker Crash Loop Alert
+      - alert: EdrosWorkerCrashLoop
+        expr: rate(edros_job_failure_rate_total{error_code=~".*timeout.*"}[10m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          tier: worker
+        annotations:
+          summary: "Distributed Workers experiencing execution timeout loop"
+          description: "Background worker processes are failing repeatedly due to execution timeouts, indicating potential resource lockouts or crash loops."

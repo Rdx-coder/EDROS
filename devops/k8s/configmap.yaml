@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edros-config
+  namespace: edros-system
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  REDIS_HOST: "edros-redis-service"
+  REDIS_PORT: "6379"
+  DATABASE_HOST: "edros-db-service"
+  DATABASE_DB: "edros_production"
+  DATABASE_USER: "edros_cluster_admin"
+  AWS_S3_BUCKET: "edros-enterprise-vault-prod"

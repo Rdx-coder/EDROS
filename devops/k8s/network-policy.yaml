@@ -1,0 +1,76 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: edros-default-deny-all
+  namespace: edros-system
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: edros-frontend-policy
+  namespace: edros-system
+spec:
+  podSelector:
+    matchLabels:
+      app: edros-frontend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow external ingress traffic to the Frontend pods
+    - from: []
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+  egress:
+    # Allow communication to DNS and Backend Server only
+    - to:
+        - podSelector:
+            matchLabels:
+              app: edros-backend
+    - ports:
+        - protocol: UDP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: edros-backend-policy
+  namespace: edros-system
+spec:
+  podSelector:
+    matchLabels:
+      app: edros-backend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Accept incoming connections only from the frontend and external ingress proxy
+    - from:
+        - podSelector:
+            matchLabels:
+              app: edros-frontend
+      ports:
+        - protocol: TCP
+          port: 3000
+  egress:
+    # Allow egress to PostgreSQL db and Redis cache containers
+    - to:
+        - podSelector:
+            matchLabels:
+              app: edros-db
+        - podSelector:
+            matchLabels:
+              app: edros-redis
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 443 # Allow external S3/OIDC operations

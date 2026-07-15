@@ -1,0 +1,50 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-serif: "Georgia", serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-brand-bg: #E4E3E0;
+  --color-brand-text: #141414;
+  --color-brand-muted-bg: #D8D7D3;
+  --color-brand-dark-bg: #141414;
+  --color-brand-accent: #FF4444;
+  --color-brand-gray-light: #EBEAE7;
+  --color-brand-gray-mid: #D1D0CC;
+  
+  --shadow-tech: 4px 4px 0px #141414;
+  --shadow-tech-sm: 2px 2px 0px #141414;
+  --shadow-tech-lg: 6px 6px 0px #141414;
+}
+
+/* Custom Base Brutalist Styles */
+body {
+  background-color: #E4E3E0;
+  color: #141414;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  height: 100%;
+  margin: 0;
+}
+
+/* Custom classes for rapid use */
+.border-tech {
+  border: 2px solid #141414;
+}
+
+.border-tech-thin {
+  border: 1px solid #141414;
+}
+
+.shadow-tech {
+  box-shadow: 4px 4px 0px #141414;
+}
+
+.shadow-tech-sm {
+  box-shadow: 2px 2px 0px #141414;
+}
+
+.shadow-tech-lg {
+  box-shadow: 6px 6px 0px #141414;
+}

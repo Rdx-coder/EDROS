@@ -1,0 +1,210 @@
+# docker-compose.prod.yml
+# Production-Grade Orchestrated Stack Configuration with Strict Resource Sandboxing
+
+version: "3.8"
+
+services:
+  # 1. Edge Web Application Proxy (Nginx Hardened Container)
+  nginx-ingress:
+    build:
+      context: ../../
+      dockerfile: devops/docker/Dockerfile.frontend
+    container_name: edros-prod-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/ssl/certs/edros_chain.crt:/etc/ssl/certs/edros_chain.crt:ro
+      - /etc/ssl/private/edros.key:/etc/ssl/private/edros.key:ro
+    depends_on:
+      edros-prod-backend-1:
+        condition: service_healthy
+      edros-prod-backend-2:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    networks:
+      - edros_prod_mesh
+
+  # 2. Production Core Engine - Instance A
+  edros-prod-backend-1:
+    build:
+      context: ../../
+      dockerfile: devops/docker/Dockerfile.backend
+    container_name: edros-prod-backend-1
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=postgresql://edros_prod_user:${DATABASE_PROD_PASSWORD}@edros-db-primary:5432/edros_prod?schema=public&sslmode=require&connection_limit=30
+      - REDIS_HOST=edros-redis-primary
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PROD_PASSWORD}
+      - JWT_SECRET=${JWT_PROD_SECRET}
+      - AES_ENCRYPTION_KEY=${AES_PROD_ENCRYPTION_KEY}
+      - AWS_S3_BUCKET=edros-audit-vault-production
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - edros_prod_mesh
+
+  # 3. Production Core Engine - Instance B
+  edros-prod-backend-2:
+    build:
+      context: ../../
+      dockerfile: devops/docker/Dockerfile.backend
+    container_name: edros-prod-backend-2
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=postgresql://edros_prod_user:${DATABASE_PROD_PASSWORD}@edros-db-primary:5432/edros_prod?schema=public&sslmode=require&connection_limit=30
+      - REDIS_HOST=edros-redis-primary
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PROD_PASSWORD}
+      - JWT_SECRET=${JWT_PROD_SECRET}
+      - AES_ENCRYPTION_KEY=${AES_PROD_ENCRYPTION_KEY}
+      - AWS_S3_BUCKET=edros-audit-vault-production
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - edros_prod_mesh
+
+  # 4. BullMQ Queue Consumer Worker Thread - Instance A
+  edros-prod-worker-1:
+    build:
+      context: ../../
+      dockerfile: devops/docker/Dockerfile.worker
+    container_name: edros-prod-worker-1
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://edros_prod_user:${DATABASE_PROD_PASSWORD}@edros-db-primary:5432/edros_prod?schema=public&sslmode=require
+      - REDIS_HOST=edros-redis-primary
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PROD_PASSWORD}
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    networks:
+      - edros_prod_mesh
+
+  # 5. BullMQ Queue Consumer Worker Thread - Instance B (Dynamic Auto-scaled backup)
+  edros-prod-worker-2:
+    build:
+      context: ../../
+      dockerfile: devops/docker/Dockerfile.worker
+    container_name: edros-prod-worker-2
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://edros_prod_user:${DATABASE_PROD_PASSWORD}@edros-db-primary:5432/edros_prod?schema=public&sslmode=require
+      - REDIS_HOST=edros-redis-primary
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PROD_PASSWORD}
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    networks:
+      - edros_prod_mesh
+
+  # 6. Primary Master PostgreSQL Instance (Strict SSL enforce + Replication ready)
+  edros-db-primary:
+    image: postgres:15-alpine
+    container_name: edros-prod-db-primary
+    restart: always
+    environment:
+      POSTGRES_DB: edros_prod
+      POSTGRES_USER: edros_prod_user
+      POSTGRES_PASSWORD: ${DATABASE_PROD_PASSWORD}
+    command: >
+      postgres
+      -c ssl=on
+      -c ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem
+      -c ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c work_mem=16MB
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edros_prod_user -d edros_prod"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - edros_prod_mesh
+
+  # 7. Enterprise Secured Redis Distributed Layer
+  edros-redis-primary:
+    image: redis:7.2-alpine
+    container_name: edros-prod-redis-primary
+    restart: always
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --requirepass ${REDIS_PROD_PASSWORD}
+      --maxmemory 1gb
+      --maxmemory-policy volatile-lru
+    volumes:
+      - redis_prod_data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PROD_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - edros_prod_mesh
+
+networks:
+  edros_prod_mesh:
+    driver: bridge
+    enable_ipv6: false
+
+volumes:
+  postgres_prod_data:
+  redis_prod_data:

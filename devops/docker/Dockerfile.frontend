@@ -1,0 +1,29 @@
+# Dockerfile.frontend
+# Secure production image for EDROS Single Page Application (Vite/React client) served via Nginx
+
+# --- Stage 1: Static Asset Compilation ---
+FROM node:20-alpine AS builder
+
+WORKDIR /usr/src/app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+# --- Stage 2: Nginx Web Server Hardening ---
+FROM nginx:1.25-alpine
+
+# Remove default configuration and add optimized reverse proxy conf
+RUN rm -rf /etc/nginx/conf.d/*
+COPY devops/nginx/nginx.conf /etc/nginx/nginx.conf
+
+# Copy build output to nginx document root
+COPY --from=builder /usr/src/app/dist /usr/share/nginx/html
+
+# Expose HTTP port 80 and HTTPS port 443
+EXPOSE 80 443
+
+# Start Nginx
+CMD ["nginx", "-g", "daemon off;"]

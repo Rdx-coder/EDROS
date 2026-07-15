@@ -1,0 +1,8 @@
+{
+  "name": "EDROS Architecture Portal",
+  "description": "Enterprise-grade Debt Recovery Operating System (EDROS) architecture and foundation workspace, showcasing Clean Architecture, Domain-Driven Design, and security pipelines.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

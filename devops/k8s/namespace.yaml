@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: edros-system
+  labels:
+    name: edros-system
+    security.kubernetes.io/enforce: restricted

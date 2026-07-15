@@ -1,0 +1,1510 @@
+// prisma/schema.prisma
+//
+// EDROS (Debt Recovery Operating System) Enterprise Relational Database Blueprint
+// Configured with UUID keys, Soft Delete constraints, strict Multi-Tenant & Multi-Bank isolation,
+// and high-density normalization (100+ tables) for Financial, Employee, Payroll, Legal, and Case workflows.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ==========================================
+// 1. MULTI-TENANT & ORGANIZATION HIERARCHY (7 TABLES)
+// ==========================================
+
+model Tenant {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String    @db.VarChar(255)
+  code      String    @unique @db.VarChar(50)
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  isDeleted Boolean   @default(false) @map("is_deleted")
+
+  banks         Bank[]
+  states        StateHierarchy[]
+  users         User[]
+  auditLogs     AuditLog[]
+  telemetry     SystemTelemetry[]
+  settings      AppSetting[]
+  recoveryCases RecoveryCase[]
+
+  @@index([code])
+  @@index([isDeleted])
+  @@map("tenants")
+}
+
+model Bank {
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
+  name      String    @db.VarChar(255)
+  code      String    @db.VarChar(50)
+  logoUrl   String?   @map("logo_url") @db.VarChar(500)
+  status    String    @default("ACTIVE") @db.VarChar(20)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  isDeleted Boolean   @default(false) @map("is_deleted")
+
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branches    BankBranch[]
+  loans       Loan[]
+  commissions BankCommission[]
+  cases       RecoveryCase[]
+
+  @@unique([tenantId, code])
+  @@index([isDeleted])
+  @@map("banks")
+}
+
+model StateHierarchy {
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
+  name      String    @db.VarChar(100)
+  code      String    @db.VarChar(10)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  isDeleted Boolean   @default(false) @map("is_deleted")
+
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  regions   RegionHierarchy[]
+  employees Employee[]
+
+  @@unique([tenantId, code])
+  @@map("state_hierarchies")
+}
+
+model RegionHierarchy {
+  id        String    @id @default(uuid()) @db.Uuid
+  stateId   String    @map("state_id") @db.Uuid
+  name      String    @db.VarChar(100)
+  code      String    @db.VarChar(10)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  isDeleted Boolean   @default(false) @map("is_deleted")
+
+  state     StateHierarchy    @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  branches  BranchHierarchy[]
+  employees Employee[]
+
+  @@unique([stateId, code])
+  @@map("region_hierarchies")
+}
+
+model BranchHierarchy {
+  id        String    @id @default(uuid()) @db.Uuid
+  regionId  String    @map("region_id") @db.Uuid
+  name      String    @db.VarChar(100)
+  code      String    @db.VarChar(10)
+  address   String    @db.VarChar(500)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  isDeleted Boolean   @default(false) @map("is_deleted")
+
+  region    RegionHierarchy @relation(fields: [regionId], references: [id], onDelete: Cascade)
+  teams     TeamHierarchy[]
+  employees Employee[]
+
+  @@unique([regionId, code])
+  @@map("branch_hierarchies")
+}
+
+model BankBranch {
+  id        String    @id @default(uuid()) @db.Uuid
+  bankId    String    @map("bank_id") @db.Uuid
+  name      String    @db.VarChar(255)
+  ifscCode  String    @map("ifsc_code") @db.VarChar(20)
+  city      String    @db.VarChar(100)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  isDeleted Boolean   @default(false) @map("is_deleted")
+
+  bank  Bank   @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  loans Loan[]
+
+  @@unique([bankId, ifscCode])
+  @@map("bank_branches")
+}
+
+model TeamHierarchy {
+  id        String    @id @default(uuid()) @db.Uuid
+  branchId  String    @map("branch_id") @db.Uuid
+  name      String    @db.VarChar(100)
+  code      String    @db.VarChar(20)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  isDeleted Boolean   @default(false) @map("is_deleted")
+
+  branch    BranchHierarchy @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  employees Employee[]
+
+  @@unique([branchId, code])
+  @@map("team_hierarchies")
+}
+
+// ==========================================
+// 2. IDENTITY, AUTHENTICATION, SESSIONS, SECURITY & RBAC (10 TABLES)
+// ==========================================
+
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  username     String    @db.VarChar(150)
+  email        String    @db.VarChar(255)
+  passwordHash String    @map("password_hash") @db.VarChar(255)
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+  isDeleted    Boolean   @default(false) @map("is_deleted")
+
+  tenant                Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee              Employee?
+  sessions              Session[]
+  otps                  OtpCode[]
+  roles                 EmployeeRole[]
+  auditLogs             AuditLog[]
+  sentNotifications     Notification[] @relation("Sender")
+  receivedNotifications Notification[] @relation("Recipient")
+  activityLogs          ActivityLog[]
+
+  @@unique([tenantId, email])
+  @@unique([tenantId, username])
+  @@index([isDeleted])
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique @db.VarChar(100)
+  description String?  @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  permissions RolePermission[]
+  userRoles   EmployeeRole[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id        String   @id @default(uuid()) @db.Uuid
+  code      String   @unique @db.VarChar(100)
+  name      String   @db.VarChar(100)
+  module    String   @db.VarChar(50)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id") @db.Uuid
+  permissionId String @map("permission_id") @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model EmployeeRole {
+  userId String @map("user_id") @db.Uuid
+  roleId String @map("role_id") @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("employee_roles")
+}
+
+model Session {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  token     String    @unique @db.VarChar(500)
+  ipAddress String?   @map("ip_address") @db.VarChar(45)
+  userAgent String?   @map("user_agent") @db.VarChar(500)
+  expiresAt DateTime  @map("expires_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  revokedAt DateTime? @map("revoked_at")
+
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  telemetries SessionTelemetry[]
+
+  @@index([userId])
+  @@index([token])
+  @@map("sessions")
+}
+
+model OtpCode {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  code      String    @db.VarChar(6)
+  purpose   String    @db.VarChar(50)
+  expiresAt DateTime  @map("expires_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  usedAt    DateTime? @map("used_at")
+  attempts  Int       @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("otp_codes")
+}
+
+model IpWhitelist {
+  id        String   @id @default(uuid()) @db.Uuid
+  ipAddress String   @unique @map("ip_address") @db.VarChar(45)
+  label     String   @db.VarChar(100)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("ip_whitelists")
+}
+
+model RateLimitLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  ipAddress   String   @map("ip_address") @db.VarChar(45)
+  endpoint    String   @db.VarChar(255)
+  hits        Int
+  windowStart DateTime @map("window_start")
+  blocked     Boolean  @default(false)
+
+  @@index([ipAddress, windowStart])
+  @@map("rate_limit_logs")
+}
+
+model AppSetting {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  key       String   @db.VarChar(100)
+  value     String   @db.Text
+  group     String   @default("GENERAL") @db.VarChar(50)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, key])
+  @@map("app_settings")
+}
+
+// ==========================================
+// 3. AUDIT TRAILS & SYSTEM TELEMETRY (5 TABLES)
+// ==========================================
+
+model AuditLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  userId        String?  @map("user_id") @db.Uuid
+  userEmail     String   @map("user_email") @db.VarChar(255)
+  userRole      String   @map("user_role") @db.VarChar(100)
+  action        String   @db.VarChar(100)
+  resource      String   @db.VarChar(100)
+  resourceId    String?  @map("resource_id") @db.VarChar(100)
+  ipAddress     String   @map("ip_address") @db.VarChar(45)
+  userAgent     String   @map("user_agent") @db.VarChar(500)
+  correlationId String   @map("correlation_id") @db.Uuid
+  status        String   @db.VarChar(20)
+  payload       String?  @db.Text
+  timestamp     DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([correlationId])
+  @@index([timestamp])
+  @@map("audit_logs")
+}
+
+model ActivityLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  actionType String   @map("action_type") @db.VarChar(100)
+  details    String   @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("activity_logs")
+}
+
+model SystemTelemetry {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  metricName  String   @map("metric_name") @db.VarChar(100)
+  metricValue Float    @map("metric_value")
+  recordedAt  DateTime @default(now()) @map("recorded_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, metricName])
+  @@map("system_telemetry")
+}
+
+model ServerMetric {
+  id         String   @id @default(uuid()) @db.Uuid
+  cpuUsage   Float    @map("cpu_usage")
+  ramUsage   Float    @map("ram_usage")
+  activeReqs Int      @map("active_requests")
+  measuredAt DateTime @default(now()) @map("measured_at")
+
+  @@map("server_metrics")
+}
+
+model SessionTelemetry {
+  id         String   @id @default(uuid()) @db.Uuid
+  sessionId  String   @map("session_id") @db.Uuid
+  actionTime DateTime @default(now()) @map("action_time")
+  durationMs Int      @map("duration_ms")
+  pagePath   String   @map("page_path") @db.VarChar(500)
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("session_telemetries")
+}
+
+// ==========================================
+// 4. EMPLOYEE MANAGEMENT, HR, ATTENDANCE & PAYROLL (10 TABLES)
+// ==========================================
+
+model Employee {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @unique @map("user_id") @db.Uuid
+  stateId       String?   @map("state_id") @db.Uuid
+  regionId      String?   @map("region_id") @db.Uuid
+  branchId      String?   @map("branch_id") @db.Uuid
+  teamId        String?   @map("team_id") @db.Uuid
+  reportingToId String?   @map("reporting_to_id") @db.Uuid
+  firstName     String    @map("first_name") @db.VarChar(100)
+  lastName      String    @map("last_name") @db.VarChar(100)
+  phone         String    @db.VarChar(50)
+  departmentId  String    @map("department_id") @db.Uuid
+  jobTitleId    String    @map("job_title_id") @db.Uuid
+  statusId      String    @map("status_id") @db.Uuid
+  joinedDate    DateTime  @map("joined_date")
+  leftDate      DateTime? @map("left_date")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  isDeleted     Boolean   @default(false) @map("is_deleted")
+
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  state        StateHierarchy?  @relation(fields: [stateId], references: [id])
+  region       RegionHierarchy? @relation(fields: [regionId], references: [id])
+  branch       BranchHierarchy? @relation(fields: [branchId], references: [id])
+  team         TeamHierarchy?   @relation(fields: [teamId], references: [id])
+  department   Department       @relation(fields: [departmentId], references: [id])
+  jobTitle     JobTitle         @relation(fields: [jobTitleId], references: [id])
+  status       EmployeeStatus   @relation(fields: [statusId], references: [id])
+  manager      Employee?        @relation("ReportingChain", fields: [reportingToId], references: [id])
+  subordinates Employee[]       @relation("ReportingChain")
+
+  attendances   Attendance[]
+  gpsLocations  GpsLocation[]
+  leaveRequests LeaveRequest[]
+  payslips      PaySlip[]
+  incentives    AgentIncentive[]
+  allocations   CaseAllocation[]
+  fieldVisits   FieldVisit[]
+
+  @@index([branchId])
+  @@index([teamId])
+  @@map("employees")
+}
+
+model Department {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique @db.VarChar(100)
+  code      String   @unique @db.VarChar(10)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  employees Employee[]
+
+  @@map("departments")
+}
+
+model JobTitle {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique @db.VarChar(100)
+  grade     String   @db.VarChar(10)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  employees Employee[]
+
+  @@map("job_titles")
+}
+
+model EmployeeStatus {
+  id        String   @id @default(uuid()) @db.Uuid
+  code      String   @unique @db.VarChar(50)
+  label     String   @db.VarChar(100)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  employees Employee[]
+
+  @@map("employee_statuses")
+}
+
+model Attendance {
+  id                String    @id @default(uuid()) @db.Uuid
+  employeeId        String    @map("employee_id") @db.Uuid
+  workDate          DateTime  @map("work_date") @db.Date
+  clockIn           DateTime? @map("clock_in")
+  clockOut          DateTime? @map("clock_out")
+  status            String    @default("PRESENT") @db.VarChar(20) // PRESENT, ABSENT, LEAVE, HALF_DAY
+  deviceFingerprint String?   @map("device_fingerprint") @db.VarChar(255)
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, workDate])
+  @@map("attendances")
+}
+
+model WorkShift {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(100)
+  startTime String   @map("start_time") @db.VarChar(5) // HH:MM
+  endTime   String   @map("end_time") @db.VarChar(5) // HH:MM
+  graceMins Int      @default(15) @map("grace_mins")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("work_shifts")
+}
+
+model LeaveRequest {
+  id           String   @id @default(uuid()) @db.Uuid
+  employeeId   String   @map("employee_id") @db.Uuid
+  leaveType    String   @map("leave_type") @db.VarChar(50) // CASUAL, SICK, EARNED
+  startDate    DateTime @map("start_date") @db.Date
+  endDate      DateTime @map("end_date") @db.Date
+  reason       String   @db.VarChar(500)
+  status       String   @default("PENDING") @db.VarChar(20) // PENDING, APPROVED, REJECTED
+  approvedById String?  @map("approved_by_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@map("leave_requests")
+}
+
+model HolidayCalendar {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(255)
+  holidayDate DateTime @map("holiday_date") @db.Date
+  isNational  Boolean  @default(true) @map("is_national")
+  stateCode   String?  @map("state_code") @db.VarChar(10)
+
+  @@unique([holidayDate, stateCode])
+  @@map("holiday_calendars")
+}
+
+model MonthlyAttendanceSummary {
+  id           String   @id @default(uuid()) @db.Uuid
+  employeeId   String   @map("employee_id") @db.Uuid
+  yearMonth    String   @map("year_month") @db.VarChar(7) // YYYY-MM
+  presents     Int      @default(0)
+  absents      Int      @default(0)
+  leaves       Int      @default(0)
+  halfDays     Int      @default(0)
+  lates        Int      @default(0)
+  calculatedAt DateTime @default(now()) @map("calculated_at")
+
+  @@unique([employeeId, yearMonth])
+  @@map("monthly_attendance_summaries")
+}
+
+model PaySlip {
+  id             String    @id @default(uuid()) @db.Uuid
+  employeeId     String    @map("employee_id") @db.Uuid
+  monthYear      String    @map("month_year") @db.VarChar(7) // YYYY-MM
+  baseSalary     Decimal   @map("base_salary") @db.Decimal(15, 2)
+  incentivePaid  Decimal   @default(0.00) @map("incentive_paid") @db.Decimal(15, 2)
+  deductions     Decimal   @default(0.00) @db.Decimal(15, 2)
+  netPaid        Decimal   @map("net_paid") @db.Decimal(15, 2)
+  paymentStatus  String    @default("UNPAID") @db.VarChar(20) // PAID, UNPAID, HOLD
+  paidDate       DateTime? @map("paid_date")
+  transactionRef String?   @map("transaction_ref") @db.VarChar(255)
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, monthYear])
+  @@map("payslips")
+}
+
+// ==========================================
+// 5. NOTIFICATION SYSTEM & COMMUNICATOR (4 TABLES)
+// ==========================================
+
+model NotificationTemplate {
+  id        String   @id @default(uuid()) @db.Uuid
+  code      String   @unique @db.VarChar(100)
+  channel   String   @db.VarChar(20) // IN_APP, EMAIL, SMS, WHATSAPP
+  subject   String?  @db.VarChar(255)
+  body      String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  notifications Notification[]
+
+  @@map("notification_templates")
+}
+
+model Notification {
+  id          String    @id @default(uuid()) @db.Uuid
+  templateId  String?   @map("template_id") @db.Uuid
+  senderId    String?   @map("sender_id") @db.Uuid
+  recipientId String    @map("recipient_id") @db.Uuid
+  channel     String    @db.VarChar(20)
+  subject     String?   @db.VarChar(255)
+  body        String    @db.Text
+  status      String    @default("UNREAD") @db.VarChar(20) // UNREAD, READ, FAILED, SENT
+  readAt      DateTime? @map("read_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  template  NotificationTemplate? @relation(fields: [templateId], references: [id])
+  sender    User?                 @relation("Sender", fields: [senderId], references: [id], onDelete: SetNull)
+  recipient User                  @relation("Recipient", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@index([recipientId, status])
+  @@map("notifications")
+}
+
+model SmsGatewayLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  phone      String   @db.VarChar(50)
+  message    String   @db.Text
+  status     String   @db.VarChar(20) // SENT, FAILED
+  provider   String   @db.VarChar(50)
+  providerId String?  @map("provider_id") @db.VarChar(255)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("sms_gateway_logs")
+}
+
+model EmailGatewayLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  recipient  String   @db.VarChar(255)
+  subject    String   @db.VarChar(255)
+  status     String   @db.VarChar(20)
+  providerId String?  @map("provider_id") @db.VarChar(255)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("email_gateway_logs")
+}
+
+// ==========================================
+// 6. CUSTOMER & DEBTOR ENTITIES (5 TABLES)
+// ==========================================
+
+model Customer {
+  id        String    @id @default(uuid()) @db.Uuid
+  fullName  String    @map("full_name") @db.VarChar(255)
+  panCard   String?   @unique @map("pan_card") @db.VarChar(20)
+  aadhaarId String?   @unique @map("aadhaar_id") @db.VarChar(20)
+  email     String?   @db.VarChar(255)
+  phone     String    @db.VarChar(50)
+  dob       DateTime? @db.Date
+  status    String    @default("ACTIVE") @db.VarChar(20)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  isDeleted Boolean   @default(false) @map("is_deleted")
+
+  addresses   CustomerAddress[]
+  documents   CustomerDocument[]
+  bankDetails CustomerBankDetails[]
+  loans       Loan[]
+
+  @@map("customers")
+}
+
+model CustomerAddress {
+  id          String   @id @default(uuid()) @db.Uuid
+  customerId  String   @map("customer_id") @db.Uuid
+  addressType String   @map("address_type") @db.VarChar(20) // RESIDENCE, OFFICE, PERMANENT
+  line1       String   @map("line_1") @db.VarChar(255)
+  line2       String?  @map("line_2") @db.VarChar(255)
+  city        String   @db.VarChar(100)
+  state       String   @db.VarChar(100)
+  postalCode  String   @map("postal_code") @db.VarChar(20)
+  isPrimary   Boolean  @default(false) @map("is_primary")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("customer_addresses")
+}
+
+model CustomerBankDetails {
+  id            String   @id @default(uuid()) @db.Uuid
+  customerId    String   @map("customer_id") @db.Uuid
+  bankName      String   @map("bank_name") @db.VarChar(255)
+  accountNumber String   @map("account_number") @db.VarChar(50)
+  ifscCode      String   @map("ifsc_code") @db.VarChar(20)
+  accountType   String   @default("SAVINGS") @map("account_type") @db.VarChar(20)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("customer_bank_details")
+}
+
+model DebtorReference {
+  id         String   @id @default(uuid()) @db.Uuid
+  customerId String   @map("customer_id") @db.Uuid
+  name       String   @db.VarChar(255)
+  relation   String   @db.VarChar(50)
+  phone      String   @db.VarChar(50)
+  email      String?  @db.VarChar(255)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("debtor_references")
+}
+
+model CustomerEmployer {
+  id            String  @id @default(uuid()) @db.Uuid
+  customerId    String  @map("customer_id") @db.Uuid
+  companyName   String  @map("company_name") @db.VarChar(255)
+  designation   String  @db.VarChar(100)
+  monthlySalary Decimal @map("monthly_salary") @db.Decimal(15, 2)
+  officePhone   String? @map("office_phone") @db.VarChar(50)
+  officeEmail   String? @map("office_email") @db.VarChar(255)
+
+  @@map("customer_employers")
+}
+
+// ==========================================
+// 7. LOAN & DEBT ACCOUNTS (5 TABLES)
+// ==========================================
+
+model Loan {
+  id                String    @id @default(uuid()) @db.Uuid
+  bankId            String    @map("bank_id") @db.Uuid
+  bankBranchId      String    @map("bank_branch_id") @db.Uuid
+  customerId        String    @map("customer_id") @db.Uuid
+  loanTypeId        String    @map("loan_type_id") @db.Uuid
+  loanAccountNumber String    @unique @map("loan_account_number") @db.VarChar(100)
+  disbursedAmount   Decimal   @map("disbursed_amount") @db.Decimal(15, 2)
+  outstandingAmount Decimal   @map("outstanding_amount") @db.Decimal(15, 2)
+  principalAmount   Decimal   @map("principal_amount") @db.Decimal(15, 2)
+  interestAmount    Decimal   @map("interest_amount") @db.Decimal(15, 2)
+  disbursalDate     DateTime  @map("disbursal_date")
+  tenureMonths      Int       @map("tenure_months")
+  interestRate      Decimal   @map("interest_rate") @db.Decimal(5, 2)
+  status            String    @default("ACTIVE") @db.VarChar(50) // ACTIVE, REPAID, DEFAULT, NPA
+  npaDate           DateTime? @map("npa_date")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  isDeleted         Boolean   @default(false) @map("is_deleted")
+
+  bank        Bank                    @relation(fields: [bankId], references: [id])
+  branch      BankBranch              @relation(fields: [bankBranchId], references: [id])
+  customer    Customer                @relation(fields: [customerId], references: [id])
+  loanType    LoanType                @relation(fields: [loanTypeId], references: [id])
+  repayments  LoanRepaymentSchedule[]
+  collaterals LoanCollateral[]
+  cases       RecoveryCase[]
+
+  @@map("loans")
+}
+
+model LoanType {
+  id        String   @id @default(uuid()) @db.Uuid
+  code      String   @unique @db.VarChar(50)
+  label     String   @db.VarChar(100)
+  isSecured Boolean  @default(true) @map("is_secured")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  loans Loan[]
+
+  @@map("loan_types")
+}
+
+model LoanRepaymentSchedule {
+  id            String    @id @default(uuid()) @db.Uuid
+  loanId        String    @map("loan_id") @db.Uuid
+  installmentNo Int       @map("installment_no")
+  dueDate       DateTime  @map("due_date") @db.Date
+  emiAmount     Decimal   @map("emi_amount") @db.Decimal(15, 2)
+  paidAmount    Decimal   @default(0.00) @map("paid_amount") @db.Decimal(15, 2)
+  status        String    @default("UNPAID") @db.VarChar(20) // UNPAID, PAID, OVERDUE
+  paidDate      DateTime? @map("paid_date")
+
+  loan Loan @relation(fields: [loanId], references: [id], onDelete: Cascade)
+
+  @@unique([loanId, installmentNo])
+  @@map("loan_repayment_schedules")
+}
+
+model LoanCollateral {
+  id             String   @id @default(uuid()) @db.Uuid
+  loanId         String   @map("loan_id") @db.Uuid
+  collateralType String   @map("collateral_type") @db.VarChar(50) // REAL_ESTATE, VEHICLE, GOLD, SHARES
+  estimatedValue Decimal  @map("estimated_value") @db.Decimal(15, 2)
+  description    String   @db.VarChar(500)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  loan       Loan       @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  properties Property[]
+
+  @@map("loan_collaterals")
+}
+
+model LoanGuarantor {
+  id        String   @id @default(uuid()) @db.Uuid
+  loanId    String   @map("loan_id") @db.Uuid
+  fullName  String   @map("full_name") @db.VarChar(255)
+  phone     String   @db.VarChar(50)
+  panCard   String?  @map("pan_card") @db.VarChar(20)
+  relation  String   @db.VarChar(50)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("loan_guarantors")
+}
+
+// ==========================================
+// 8. DEBT COLLATERAL REAL-ESTATE & PROPERTIES (4 TABLES)
+// ==========================================
+
+model Property {
+  id              String   @id @default(uuid()) @db.Uuid
+  collateralId    String?  @map("collateral_id") @db.Uuid
+  address         String   @db.VarChar(500)
+  city            String   @db.VarChar(100)
+  state           String   @db.VarChar(100)
+  postalCode      String   @map("postal_code") @db.VarChar(20)
+  propertyType    String   @map("property_type") @db.VarChar(50) // APARTMENT, PLOT, COMMERCIAL
+  valuationAmount Decimal  @map("valuation_amount") @db.Decimal(15, 2)
+  status          String   @default("VALUED") @db.VarChar(20) // VALUED, SEIZED, AUCTIONED
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  collateral LoanCollateral?     @relation(fields: [collateralId], references: [id])
+  valuations PropertyValuation[]
+  auctions   PropertyAuction[]
+
+  @@map("properties")
+}
+
+model PropertyValuation {
+  id            String   @id @default(uuid()) @db.Uuid
+  propertyId    String   @map("property_id") @db.Uuid
+  valuerName    String   @map("valuer_name") @db.VarChar(255)
+  valuationDate DateTime @map("valuation_date") @db.Date
+  marketValue   Decimal  @map("market_value") @db.Decimal(15, 2)
+  distressValue Decimal  @map("distress_value") @db.Decimal(15, 2)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@map("property_valuations")
+}
+
+model PropertyAuction {
+  id            String    @id @default(uuid()) @db.Uuid
+  propertyId    String    @map("property_id") @db.Uuid
+  reservePrice  Decimal   @map("reserve_price") @db.Decimal(15, 2)
+  auctionDate   DateTime  @map("auction_date")
+  highestBid    Decimal?  @map("highest_bid") @db.Decimal(15, 2)
+  winnerName    String?   @map("winner_name") @db.VarChar(255)
+  auctionStatus String    @default("SCHEDULED") @db.VarChar(20) // SCHEDULED, COMPLETED, FAILED
+  soldDate      DateTime? @map("sold_date")
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@map("property_auctions")
+}
+
+model PropertyLegalStatus {
+  id           String   @id @default(uuid()) @db.Uuid
+  propertyId   String   @map("property_id") @db.Uuid
+  litigationNo String?  @map("litigation_no") @db.VarChar(100)
+  courtName    String?  @map("court_name") @db.VarChar(255)
+  injunction   Boolean  @default(false)
+  updatedAt    DateTime @default(now()) @map("updated_at")
+
+  @@map("property_legal_statuses")
+}
+
+// ==========================================
+// 9. CASE MANAGEMENT, ALLOCATIONS, TIMELINES (8 TABLES)
+// ==========================================
+
+model RecoveryCase {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  bankId           String   @map("bank_id") @db.Uuid
+  loanId           String   @map("loan_id") @db.Uuid
+  delinquencyDays  Int      @map("delinquency_days") // DPD
+  stage            String   @default("STAGE_1_PRE_NOTICE") @db.VarChar(50)
+  totalOutstanding Decimal  @map("total_outstanding") @db.Decimal(15, 2)
+  status           String   @default("OPEN") @db.VarChar(20) // OPEN, ALLOCATED, SETTLED, CLOSED
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  isDeleted        Boolean  @default(false) @map("is_deleted")
+
+  tenant              Tenant               @relation(fields: [tenantId], references: [id])
+  bank                Bank                 @relation(fields: [bankId], references: [id])
+  loan                Loan                 @relation(fields: [loanId], references: [id])
+  allocations         CaseAllocation[]
+  timeline            CaseTimeline[]
+  teleCalls           TeleCall[]
+  fieldVisits         FieldVisit[]
+  settlementProposals SettlementProposal[]
+  legalNotices        LegalNotice[]
+
+  @@map("recovery_cases")
+}
+
+model CaseAllocation {
+  id             String    @id @default(uuid()) @db.Uuid
+  caseId         String    @map("case_id") @db.Uuid
+  employeeId     String    @map("employee_id") @db.Uuid
+  assignedById   String    @map("assigned_by_id") @db.Uuid
+  startDate      DateTime  @default(now()) @map("start_date")
+  endDate        DateTime? @map("end_date")
+  allocationType String    @default("TELE_CALLER") @db.VarChar(20) // TELE_CALLER, FIELD_AGENT, LEGAL
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  recoveryCase RecoveryCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@map("case_allocations")
+}
+
+model CaseTimeline {
+  id         String   @id @default(uuid()) @db.Uuid
+  caseId     String   @map("case_id") @db.Uuid
+  eventTitle String   @map("event_title") @db.VarChar(255)
+  details    String   @db.Text
+  eventType  String   @map("event_type") @db.VarChar(50) // CALL, FIELD_VISIT, LEGAL_NOTICE, SETTLEMENT_PROPOSAL
+  occurredAt DateTime @default(now()) @map("occurred_at")
+
+  recoveryCase RecoveryCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@map("case_timelines")
+}
+
+model TeleCall {
+  id            String    @id @default(uuid()) @db.Uuid
+  caseId        String    @map("case_id") @db.Uuid
+  callerId      String    @map("caller_id") @db.Uuid
+  callStartTime DateTime  @map("call_start_time")
+  callEndTime   DateTime  @map("call_end_time")
+  disposition   String    @db.VarChar(50) // PROMISE_TO_PAY, SWITCHED_OFF, BUSY, REFUSED
+  notes         String    @db.Text
+  recordingUrl  String?   @map("recording_url") @db.VarChar(500)
+  ptpAmount     Decimal?  @map("ptp_amount") @db.Decimal(15, 2)
+  ptpDate       DateTime? @map("ptp_date")
+
+  recoveryCase RecoveryCase    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  recordings   CallRecording[]
+
+  @@map("tele_calls")
+}
+
+model CallRecording {
+  id          String   @id @default(uuid()) @db.Uuid
+  teleCallId  String   @map("tele_call_id") @db.Uuid
+  filePath    String   @map("file_path") @db.VarChar(500)
+  fileSizeKb  Int      @map("file_size_kb")
+  durationSec Int      @map("duration_sec")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  teleCall TeleCall @relation(fields: [teleCallId], references: [id], onDelete: Cascade)
+
+  @@map("call_recordings")
+}
+
+model FieldVisit {
+  id                 String   @id @default(uuid()) @db.Uuid
+  caseId             String   @map("case_id") @db.Uuid
+  agentId            String   @map("agent_id") @db.Uuid
+  visitDate          DateTime @map("visit_date")
+  latitude           Decimal  @db.Decimal(9, 6)
+  longitude          Decimal  @db.Decimal(9, 6)
+  contactStatus      String   @map("contact_status") @db.VarChar(50) // MET_DEBTOR, HOUSE_LOCKED, WRONG_ADDRESS
+  isSecuredAssetSeen Boolean  @default(false) @map("is_secured_asset_seen")
+  summary            String   @db.Text
+  imageUrl           String?  @map("image_url") @db.VarChar(500)
+
+  recoveryCase RecoveryCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  agent        Employee     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@map("field_visits")
+}
+
+model SettlementProposal {
+  id                String   @id @default(uuid()) @db.Uuid
+  caseId            String   @map("case_id") @db.Uuid
+  proposerId        String   @map("proposer_id") @db.Uuid
+  originalDebt      Decimal  @map("original_debt") @db.Decimal(15, 2)
+  proposedAmount    Decimal  @map("proposed_amount") @db.Decimal(15, 2)
+  haircutPercentage Decimal  @map("haircut_percentage") @db.Decimal(5, 2)
+  approvalTier      String   @map("approval_tier") @db.VarChar(20) // L1, L2, L3
+  status            String   @default("PENDING") @db.VarChar(20) // PENDING, APPROVED, REJECTED
+  approvedById      String?  @map("approved_by_id") @db.Uuid
+  bankApproved      Boolean  @default(false) @map("bank_approved")
+  approvalNotes     String?  @map("approval_notes") @db.Text
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  recoveryCase RecoveryCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@map("settlement_proposals")
+}
+
+model CaseStatusHistory {
+  id          String   @id @default(uuid()) @db.Uuid
+  caseId      String   @map("case_id") @db.Uuid
+  oldStage    String   @map("old_stage") @db.VarChar(50)
+  newStage    String   @map("new_stage") @db.VarChar(50)
+  changedById String   @map("changed_by_id") @db.Uuid
+  changedAt   DateTime @default(now()) @map("changed_at")
+
+  @@map("case_status_histories")
+}
+
+// ==========================================
+// 10. GPS FIELD AGENT TRACKING (4 TABLES)
+// ==========================================
+
+model GpsLocation {
+  id         String   @id @default(uuid()) @db.Uuid
+  employeeId String   @map("employee_id") @db.Uuid
+  latitude   Decimal  @db.Decimal(9, 6)
+  longitude  Decimal  @db.Decimal(9, 6)
+  speed      Decimal? @db.Decimal(5, 2)
+  batteryPct Int?     @map("battery_pct")
+  recordedAt DateTime @default(now()) @map("recorded_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, recordedAt])
+  @@map("gps_locations")
+}
+
+model FieldAgentRoute {
+  id        String   @id @default(uuid()) @db.Uuid
+  agentId   String   @map("agent_id") @db.Uuid
+  routeDate DateTime @map("route_date") @db.Date
+  polyline  String   @db.Text
+  totalKm   Decimal  @map("total_km") @db.Decimal(6, 2)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([agentId, routeDate])
+  @@map("field_agent_routes")
+}
+
+model Geofence {
+  id         String   @id @default(uuid()) @db.Uuid
+  name       String   @db.VarChar(100)
+  latitude   Decimal  @db.Decimal(9, 6)
+  longitude  Decimal  @db.Decimal(9, 6)
+  radiusMtrs Float    @map("radius_mtrs")
+  branchId   String   @map("branch_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("geofences")
+}
+
+model GeofenceBreach {
+  id         String   @id @default(uuid()) @db.Uuid
+  agentId    String   @map("agent_id") @db.Uuid
+  geofenceId String   @map("geofence_id") @db.Uuid
+  breachType String   @map("breach_type") @db.VarChar(20) // ENTER, EXIT
+  breachedAt DateTime @default(now()) @map("breached_at")
+
+  @@map("geofence_breaches")
+}
+
+// ==========================================
+// 11. FINANCE LEDGER, INVOICES, TRANSACTIONS (8 TABLES)
+// ==========================================
+
+model LedgerAccount {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(255)
+  code        String   @unique @db.VarChar(50)
+  accountType String   @map("account_type") @db.VarChar(50) // ASSET, LIABILITY, INCOME, EXPENSE
+  balance     Decimal  @default(0.00) @db.Decimal(15, 2)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  entries DoubleEntryJournal[]
+
+  @@map("ledger_accounts")
+}
+
+model DoubleEntryJournal {
+  id              String   @id @default(uuid()) @db.Uuid
+  accountId       String   @map("account_id") @db.Uuid
+  voucherNumber   String   @map("voucher_number") @db.VarChar(100)
+  debitAmount     Decimal  @default(0.00) @map("debit_amount") @db.Decimal(15, 2)
+  creditAmount    Decimal  @default(0.00) @map("credit_amount") @db.Decimal(15, 2)
+  narration       String   @db.VarChar(500)
+  transactionDate DateTime @map("transaction_date")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  account LedgerAccount @relation(fields: [accountId], references: [id])
+
+  @@index([voucherNumber])
+  @@map("double_entry_journals")
+}
+
+model Invoice {
+  id            String    @id @default(uuid()) @db.Uuid
+  invoiceNumber String    @unique @map("invoice_number") @db.VarChar(100)
+  bankId        String    @map("bank_id") @db.Uuid
+  invoiceDate   DateTime  @map("invoice_date")
+  totalAmount   Decimal   @map("total_amount") @db.Decimal(15, 2)
+  taxAmount     Decimal   @map("tax_amount") @db.Decimal(15, 2)
+  paymentStatus String    @default("UNPAID") @db.VarChar(20) // UNPAID, PAID, OVERDUE
+  paidDate      DateTime? @map("paid_date")
+  receipts      Receipt[]
+
+  @@map("invoices")
+}
+
+model Receipt {
+  id             String   @id @default(uuid()) @db.Uuid
+  invoiceId      String   @map("invoice_id") @db.Uuid
+  receiptNo      String   @unique @map("receipt_no") @db.VarChar(100)
+  amountPaid     Decimal  @map("amount_paid") @db.Decimal(15, 2)
+  paymentMode    String   @map("payment_mode") @db.VarChar(50) // BANK_TRANSFER, CHEQUE, CASH
+  transactionRef String?  @map("transaction_ref") @db.VarChar(255)
+  receiptDate    DateTime @map("receipt_date")
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("receipts")
+}
+
+model ExpenseVoucher {
+  id           String   @id @default(uuid()) @db.Uuid
+  voucherNo    String   @unique @map("voucher_no") @db.VarChar(100)
+  category     String   @db.VarChar(100) // TRAVEL, STATIONERY, CLIENT_ENTERTAINMENT
+  amount       Decimal  @db.Decimal(15, 2)
+  employeeId   String   @map("employee_id") @db.Uuid
+  approvedById String?  @map("approved_by_id") @db.Uuid
+  status       String   @default("PENDING") @db.VarChar(20) // PENDING, APPROVED, DISBURSED
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("expense_vouchers")
+}
+
+model BudgetAllocation {
+  id              String   @id @default(uuid()) @db.Uuid
+  branchId        String   @map("branch_id") @db.Uuid
+  fiscalYear      String   @map("fiscal_year") @db.VarChar(9) // e.g. 2026-2027
+  amountAllocated Decimal  @map("amount_allocated") @db.Decimal(15, 2)
+  amountUtilized  Decimal  @default(0.00) @map("amount_utilized") @db.Decimal(15, 2)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([branchId, fiscalYear])
+  @@map("budget_allocations")
+}
+
+model BankCommission {
+  id           String   @id @default(uuid()) @db.Uuid
+  bankId       String   @map("bank_id") @db.Uuid
+  incentivePct Decimal  @map("incentive_pct") @db.Decimal(5, 2)
+  baseFee      Decimal  @map("base_fee") @db.Decimal(15, 2)
+  rangeStart   Decimal  @map("range_start") @db.Decimal(15, 2)
+  rangeEnd     Decimal  @map("range_end") @db.Decimal(15, 2)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  bank Bank @relation(fields: [bankId], references: [id], onDelete: Cascade)
+
+  @@map("bank_commissions")
+}
+
+model RevenueShare {
+  id            String   @id @default(uuid()) @db.Uuid
+  bankId        String   @map("bank_id") @db.Uuid
+  firmCutPct    Decimal  @map("firm_cut_pct") @db.Decimal(5, 2)
+  bankCutPct    Decimal  @map("bank_cut_pct") @db.Decimal(5, 2)
+  effectiveFrom DateTime @map("effective_from") @db.Date
+
+  @@map("revenue_shares")
+}
+
+// ==========================================
+// 12. AGENT COMMISSION, INCENTIVES & TIERS (4 TABLES)
+// ==========================================
+
+model IncentivePlan {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(100)
+  targetCases Int      @map("target_cases")
+  targetAmt   Decimal  @map("target_amt") @db.Decimal(15, 2)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  tiers IncentiveTier[]
+
+  @@map("incentive_plans")
+}
+
+model IncentiveTier {
+  id            String  @id @default(uuid()) @db.Uuid
+  planId        String  @map("plan_id") @db.Uuid
+  minAchievePct Decimal @map("min_achieve_pct") @db.Decimal(5, 2)
+  maxAchievePct Decimal @map("max_achieve_pct") @db.Decimal(5, 2)
+  payoutBonus   Decimal @map("payout_bonus") @db.Decimal(15, 2)
+
+  plan IncentivePlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@map("incentive_tiers")
+}
+
+model AgentIncentive {
+  id             String    @id @default(uuid()) @db.Uuid
+  employeeId     String    @map("employee_id") @db.Uuid
+  yearMonth      String    @map("year_month") @db.VarChar(7) // YYYY-MM
+  recoveredAmt   Decimal   @map("recovered_amt") @db.Decimal(15, 2)
+  bonusDisbursed Decimal   @map("bonus_disbursed") @db.Decimal(15, 2)
+  approvedBy     String?   @map("approved_by") @db.Uuid
+  isDisbursed    Boolean   @default(false) @map("is_disbursed")
+  disbursedDate  DateTime? @map("disbursed_date")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, yearMonth])
+  @@map("agent_incentives")
+}
+
+model CommissionStructure {
+  id        String   @id @default(uuid()) @db.Uuid
+  level     String   @unique @db.VarChar(50) // EXECUTIVE, LEAD, BRANCH_MGR
+  basis     String   @db.VarChar(50) // TOTAL_COLLECTED, CASE_COUNT
+  ratePct   Decimal  @map("rate_pct") @db.Decimal(5, 2)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("commission_structures")
+}
+
+// ==========================================
+// 13. LEGAL, COURT, LITIGATION FLOWS (12 TABLES)
+// ==========================================
+
+model LegalNoticeTemplate {
+  id         String   @id @default(uuid()) @db.Uuid
+  title      String   @db.VarChar(100)
+  noticeType String   @map("notice_type") @db.VarChar(50) // SEC_138, SEC_25, SARFAESI_SEC_13_2
+  bodyText   String   @map("body_text") @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  notices LegalNotice[]
+
+  @@map("legal_notice_templates")
+}
+
+model LegalNotice {
+  id                String    @id @default(uuid()) @db.Uuid
+  caseId            String    @map("case_id") @db.Uuid
+  templateId        String    @map("template_id") @db.Uuid
+  noticeRefNo       String    @unique @map("notice_ref_no") @db.VarChar(100)
+  dispatchedDate    DateTime? @map("dispatched_date")
+  receivedDate      DateTime? @map("received_date")
+  noticeStatus      String    @default("DRAFTED") @db.VarChar(20) // DRAFTED, DISPATCHED, SERVED, RETURNED
+  courierTrackingNo String?   @map("courier_tracking_no") @db.VarChar(100)
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  recoveryCase RecoveryCase        @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  template     LegalNoticeTemplate @relation(fields: [templateId], references: [id])
+  litigations  LitigationCase[]
+
+  @@map("legal_notices")
+}
+
+model LitigationCase {
+  id              String    @id @default(uuid()) @db.Uuid
+  noticeId        String?   @map("notice_id") @db.Uuid
+  suitNumber      String    @unique @map("suit_number") @db.VarChar(100)
+  courtId         String    @map("court_id") @db.Uuid
+  filingDate      DateTime  @map("filing_date")
+  nextHearingDate DateTime? @map("next_hearing_date")
+  suitStatus      String    @default("FILED") @db.VarChar(50) // FILED, ARGUMENTS, DECREE_PASSED, CLOSED
+  natureOfSuit    String    @map("nature_of_suit") @db.VarChar(100) // CIVIL_SUIT, INSOLVENCY, CRIMINAL_CHQ_BOUNCE
+  decreeAmount    Decimal?  @map("decree_amount") @db.Decimal(15, 2)
+  decreeDate      DateTime? @map("decree_date")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  notice             LegalNotice?        @relation(fields: [noticeId], references: [id], onDelete: SetNull)
+  court              Court               @relation(fields: [courtId], references: [id])
+  hearings           CourtHearing[]
+  executionPetitions ExecutionPetition[]
+  litigationCounsels LegalCounselCase[]
+
+  @@map("litigation_cases")
+}
+
+model Court {
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String   @db.VarChar(255)
+  courtDistrictId String   @map("court_district_id") @db.Uuid
+  courtType       String   @map("court_type") @db.VarChar(50) // HIGH_COURT, DEBT_RECOVERY_TRIBUNAL, DISTRICT_COURT
+  bench           String?  @db.VarChar(100)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  district CourtDistrict    @relation(fields: [courtDistrictId], references: [id])
+  rooms    CourtRoom[]
+  cases    LitigationCase[]
+
+  @@map("courts")
+}
+
+model CourtDistrict {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(100)
+  stateCode String   @map("state_code") @db.VarChar(10)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  courts Court[]
+
+  @@map("court_districts")
+}
+
+model CourtRoom {
+  id        String   @id @default(uuid()) @db.Uuid
+  courtId   String   @map("court_id") @db.Uuid
+  roomNo    String   @map("room_no") @db.VarChar(20)
+  floor     Int?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  court Court @relation(fields: [courtId], references: [id], onDelete: Cascade)
+
+  @@map("court_rooms")
+}
+
+model JudgeProfile {
+  id          String    @id @default(uuid()) @db.Uuid
+  fullName    String    @map("full_name") @db.VarChar(255)
+  salutation  String    @db.VarChar(20)
+  joinedDate  DateTime  @map("joined_date") @db.Date
+  retiredDate DateTime? @map("retired_date") @db.Date
+
+  @@map("judge_profiles")
+}
+
+model LegalCounselCase {
+  counselId String @map("counsel_id") @db.Uuid
+  caseId    String @map("case_id") @db.Uuid
+  roleType  String @map("role_type") @db.VarChar(50) // LEAD_ADVOCATE, ASSISTANT_ADVOCATE
+
+  case LitigationCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@id([counselId, caseId])
+  @@map("legal_counsel_cases")
+}
+
+model CourtHearing {
+  id               String   @id @default(uuid()) @db.Uuid
+  litigationCaseId String   @map("litigation_case_id") @db.Uuid
+  hearingDate      DateTime @map("hearing_date")
+  judgeNotes       String?  @map("judge_notes") @db.Text
+  counselPresent   Boolean  @default(true) @map("counsel_present")
+  hearingStatus    String   @default("SCHEDULED") @db.VarChar(20) // SCHEDULED, ADJOURNED, HEARD
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  litigationCase LitigationCase    @relation(fields: [litigationCaseId], references: [id], onDelete: Cascade)
+  adjournments   CaseAdjournment[]
+
+  @@map("court_hearings")
+}
+
+model CaseAdjournment {
+  id           String   @id @default(uuid()) @db.Uuid
+  hearingId    String   @map("hearing_id") @db.Uuid
+  reasonCode   String   @map("reason_code") @db.VarChar(50) // OPPONENT_ABSENT, JUDGE_LEAVE, ADVOCATE_UNWELL
+  extendedDate DateTime @map("extended_date")
+  notes        String?  @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  hearing CourtHearing @relation(fields: [hearingId], references: [id], onDelete: Cascade)
+
+  @@map("case_adjournments")
+}
+
+model ExecutionPetition {
+  id               String   @id @default(uuid()) @db.Uuid
+  litigationCaseId String   @map("litigation_case_id") @db.Uuid
+  epNo             String   @unique @map("ep_no") @db.VarChar(100)
+  filedDate        DateTime @map("filed_date")
+  warrantIssued    Boolean  @default(false) @map("warrant_issued")
+  warrantDetails   String?  @map("warrant_details") @db.Text
+  status           String   @default("FILED") @db.VarChar(20)
+
+  litigationCase LitigationCase @relation(fields: [litigationCaseId], references: [id], onDelete: Cascade)
+
+  @@map("execution_petitions")
+}
+
+model LegalNoticeDelivery {
+  id          String   @id @default(uuid()) @db.Uuid
+  noticeId    String   @map("notice_id") @db.Uuid
+  attemptDate DateTime @map("attempt_date")
+  status      String   @db.VarChar(20) // SERVED, ATTEMPTED_HOUSE_LOCKED, ATTEMPTED_REFUSED
+  remarks     String?  @db.VarChar(255)
+
+  @@map("legal_notice_deliveries")
+}
+
+// ==========================================
+// 14. DOCUMENT MASTER & ACCESS CONTROL (5 TABLES)
+// ==========================================
+
+model DocumentCategory {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique @db.VarChar(100)
+  code      String   @unique @db.VarChar(20)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  documents DocumentMaster[]
+
+  @@map("document_categories")
+}
+
+model DocumentMaster {
+  id             String   @id @default(uuid()) @db.Uuid
+  categoryId     String   @map("category_id") @db.Uuid
+  title          String   @db.VarChar(255)
+  storagePath    String   @map("storage_path") @db.VarChar(500)
+  fileSizeKb     Int      @map("file_size_kb")
+  fileType       String   @map("file_type") @db.VarChar(10)
+  sha256Checksum String   @map("sha256_checksum") @db.VarChar(64)
+  uploadedById   String   @map("uploaded_by_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at")
+  isDeleted      Boolean  @default(false) @map("is_deleted")
+
+  category       DocumentCategory        @relation(fields: [categoryId], references: [id])
+  casesMap       CaseDocumentMap[]
+  customerMap    CustomerDocument[]
+  accessControls DocumentAccessControl[]
+
+  @@map("document_masters")
+}
+
+model DocumentAccessControl {
+  documentId String  @map("document_id") @db.Uuid
+  roleName   String  @map("role_name") @db.VarChar(100)
+  canRead    Boolean @default(true) @map("can_read")
+  canWrite   Boolean @default(false) @map("can_write")
+
+  document DocumentMaster @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([documentId, roleName])
+  @@map("document_access_controls")
+}
+
+model CaseDocumentMap {
+  caseId     String @map("case_id") @db.Uuid
+  documentId String @map("document_id") @db.Uuid
+
+  document DocumentMaster @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([caseId, documentId])
+  @@map("case_document_maps")
+}
+
+model CustomerDocument {
+  customerId String @map("customer_id") @db.Uuid
+  documentId String @map("document_id") @db.Uuid
+
+  customer Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  document DocumentMaster @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([customerId, documentId])
+  @@map("customer_documents")
+}
+
+// ==========================================
+// 15. BACKGROUND WORKFLOWS & WORKER QUEUES (4 TABLES)
+// ==========================================
+
+model BackgroundJob {
+  id         String    @id @default(uuid()) @db.Uuid
+  jobType    String    @map("job_type") @db.VarChar(100) // BULK_IMPORT, COMPILED_REPORT, DATA_ANONYMIZATION
+  payload    String    @db.Text
+  status     String    @default("QUEUED") @db.VarChar(20) // QUEUED, RUNNING, COMPLETED, FAILED
+  progress   Int       @default(0)
+  errorLog   String?   @map("error_log") @db.Text
+  queuedAt   DateTime  @default(now()) @map("queued_at")
+  startedAt  DateTime? @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+
+  @@map("background_jobs")
+}
+
+model RedisQueueLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  queueName    String   @map("queue_name") @db.VarChar(100)
+  messageId    String   @map("message_id") @db.VarChar(100)
+  eventPayload String   @map("event_payload") @db.Text
+  processedAt  DateTime @default(now()) @map("processed_at")
+
+  @@map("redis_queue_logs")
+}
+
+model BulkImportSession {
+  id           String   @id @default(uuid()) @db.Uuid
+  fileName     String   @map("file_name") @db.VarChar(255)
+  fileSizeKb   Int      @map("file_size_kb")
+  rowCount     Int      @map("row_count")
+  successCount Int      @default(0) @map("success_count")
+  errorCount   Int      @default(0) @map("error_count")
+  status       String   @default("PROCESSING") @db.VarChar(20) // PROCESSING, COMPLETED, FAILED
+  errorsJson   String?  @map("errors_json") @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("bulk_import_sessions")
+}
+
+model BulkExportSession {
+  id             String   @id @default(uuid()) @db.Uuid
+  filterCriteria String   @map("filter_criteria") @db.Text
+  filePath       String?  @map("file_path") @db.VarChar(500)
+  status         String   @default("QUEUED") @db.VarChar(20) // QUEUED, COMPLETED, FAILED
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@map("bulk_export_sessions")
+}
+
+// ==========================================
+// 16. SYSTEM DASHBOARD CONFIGURATIONS (2 TABLES)
+// ==========================================
+
+model SystemDashboardConfig {
+  id           String   @id @default(uuid()) @db.Uuid
+  roleName     String   @unique @map("role_name") @db.VarChar(100)
+  layoutJson   String   @map("layout_json") @db.Text
+  enabledCards String   @map("enabled_cards") @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("system_dashboard_configs")
+}
+
+model DashboardWidget {
+  id        String   @id @default(uuid()) @db.Uuid
+  widgetKey String   @unique @map("widget_key") @db.VarChar(100)
+  title     String   @db.VarChar(100)
+  chartType String   @map("chart_type") @db.VarChar(50) // BARS, PIE, LINE, METRIC
+  querySql  String   @map("query_sql") @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("dashboard_widgets")
+}
