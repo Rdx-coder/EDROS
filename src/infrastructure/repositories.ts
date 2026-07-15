@@ -11,42 +11,45 @@ import { PinoLogger } from "./pinoLogger";
 import { DatabaseError } from "./exceptions";
 import { dbQueryTime } from "./observability";
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient().$extends({
+  query: {
+    $allOperations({ model, operation, args, query }) {
+      const start = Date.now();
+      return query(args).then(
+        (result) => {
+          const duration = Date.now() - start;
+          
+          // Track metrics
+          dbQueryTime.observe(
+            {
+              query_type: operation,
+              table: model || "raw",
+              operation: operation,
+            },
+            duration / 1000
+          );
 
-// High-fidelity database query execution tracing & APM
-(prisma as any).$use(async (params: any, next: any) => {
-  const start = Date.now();
-  try {
-    const result = await next(params);
-    const duration = Date.now() - start;
-    
-    // Track metrics
-    dbQueryTime.observe(
-      {
-        query_type: params.action,
-        table: params.model || "raw",
-        operation: params.action,
-      },
-      duration / 1000
-    );
+          PinoLogger.db(`Prisma database query succeeded`, {
+            model,
+            action: operation,
+            durationMs: duration,
+          });
 
-    PinoLogger.db(`Prisma database query succeeded`, {
-      model: params.model,
-      action: params.action,
-      durationMs: duration,
-    });
-
-    return result;
-  } catch (err: any) {
-    const duration = Date.now() - start;
-    PinoLogger.error(`Prisma database query failed`, {
-      model: params.model,
-      action: params.action,
-      durationMs: duration,
-      error: err.message,
-    });
-    throw err;
-  }
+          return result;
+        },
+        (err: any) => {
+          const duration = Date.now() - start;
+          PinoLogger.error(`Prisma database query failed`, {
+            model,
+            action: operation,
+            durationMs: duration,
+            error: err.message,
+          });
+          throw err;
+        }
+      );
+    },
+  },
 });
 
 /**
