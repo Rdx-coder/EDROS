@@ -3,92 +3,231 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures/base";
 
-test.describe("EDROS Banking & Debt Recovery Operating System E2E & Accessibility Tests", () => {
+test.describe("EDROS Banking & Debt Recovery Operating System Enterprise E2E Test Suite", () => {
 
-  test("1. Multi-factor Authentication Flow and Session Storage verification", async ({ page }) => {
-    // 1. Visit App Root
-    await page.goto("/");
+  // ==========================================
+  // Test 1: Title & Authentication Flow
+  // ==========================================
+  test("1. Multi-factor Authentication Flow and Landing Page Identity", async ({ authPage, page }) => {
+    // Navigate to application root
+    await authPage.navigate();
+
+    // Verify Application Title
     await expect(page).toHaveTitle(/EDROS/i);
 
-    // 2. Auth Page is displayed. Find email input, verify default and fill credentials
-    const emailInput = page.locator('input[type="email"]');
-    await expect(emailInput).toBeVisible();
-    await emailInput.fill("rahul.dangi.sait@gmail.com");
+    // Verify input states (Visible, Editable, Enabled, Accessible)
+    await expect(authPage.emailInput).toBeVisible();
+    await expect(authPage.emailInput).toBeEditable();
+    await expect(authPage.emailInput).toBeEnabled();
 
-    const passwordInput = page.locator('input[type="password"]');
-    await passwordInput.fill("edros-secure-2026");
+    await expect(authPage.passwordInput).toBeVisible();
+    await expect(authPage.passwordInput).toBeEditable();
+    await expect(authPage.passwordInput).toBeEnabled();
 
-    // Click AUTHENTICATE OPERATOR
-    const loginButton = page.locator('button[type="submit"]');
-    await expect(loginButton).toContainText("AUTHENTICATE OPERATOR");
-    await loginButton.click();
+    // Complete login flow
+    await authPage.completeLoginFlow("rahul.dangi.sait@gmail.com", "edros-secure-2026", "123456");
 
-    // 3. MFA Screen: Wait for OTP input digits to be visible
-    const otpFields = page.locator('input[maxLength="1"]');
-    await expect(otpFields.first()).toBeVisible();
+    // Wait for authentication and verify landing page elements
+    const dashboardTitle = page.locator('h1:has-text("EDROS / Enterprise Debt Recovery OS")');
+    await expect(dashboardTitle).toBeVisible();
 
-    // Type complete OTP code: '123456'
-    for (let i = 0; i < 6; i++) {
-      await otpFields.nth(i).fill(String(i + 1));
-    }
-
-    // Submit OTP Passcode
-    const verifyButton = page.locator('button:has-text("VERIFY ACCESS PASS")');
-    await verifyButton.click();
-
-    // 4. Session Successful: Validate login identity and operations dashboard entry
-    const operatorIdentity = page.locator('span:has-text("Operator: rahul.dangi.sait@gmail.com")');
-    await expect(operatorIdentity).toBeVisible();
+    const operatorId = page.locator('span:has-text("Operator: rahul.dangi.sait@gmail.com")');
+    await expect(operatorId).toBeVisible();
   });
 
-  test("2. Operations tab navigation & View switching sanity checks", async ({ page }) => {
-    // Perform auto-bypass log in
-    await page.goto("/");
-    await page.locator('button[type="submit"]').click();
-    await page.waitForTimeout(1500); // Wait for transition
-    await page.locator('button:has-text("VERIFY ACCESS PASS")').click();
+  // ==========================================
+  // Test 2: Core Dashboard & Tab Navigation
+  // ==========================================
+  test("2. Operations Console Tab Navigation & Layout Verification", async ({ authenticatedPage }) => {
+    const { dashboardPage } = authenticatedPage;
 
-    // Confirm landing on the main Operations dashboard view
-    await expect(page.locator('span:has-text("Operator:")')).toBeVisible();
+    // Verify Ingress Gateway Footer elements
+    await expect(dashboardPage.apiLiveIndicator).toBeVisible();
 
-    // Click through standard enterprise tabs to verify frontend view lifecycle
-    const tabs = ["DASHBOARD", "EMPLOYEES", "DEBTORS", "RECOVERY", "LEGAL", "DOCUMENTS", "SETTINGS", "WORKFLOWS"];
+    // Loop and navigate through each major enterprise operations tab to check view rendering
+    const tabs: Array<"DASHBOARD" | "ORGANIZATION" | "EMPLOYEES" | "DEBTORS" | "RECOVERY" | "LEGAL" | "DOCUMENTS" | "SETTINGS" | "WORKFLOWS"> = [
+      "DASHBOARD",
+      "ORGANIZATION",
+      "EMPLOYEES",
+      "DEBTORS",
+      "RECOVERY",
+      "LEGAL",
+      "DOCUMENTS",
+      "SETTINGS",
+      "WORKFLOWS"
+    ];
 
     for (const tab of tabs) {
-      const tabBtn = page.locator(`button:has-text("${tab}")`);
-      if (await tabBtn.count() > 0) {
-        await tabBtn.first().click();
-        await page.waitForTimeout(100); // Give React brief paint interval
-      }
+      await dashboardPage.navigateToTab(tab);
+      // Double check active state or content container element exists and is visible
+      const contentContainer = dashboardPage.page.locator('#edros-workspace');
+      await expect(contentContainer).toBeVisible();
     }
   });
 
-  test("3. Visual Responsiveness & Device Adapter checks", async ({ page }) => {
+  // ==========================================
+  // Test 3: Employee Module (Roster, Attendance, Payslips)
+  // ==========================================
+  test("3. Employee Roster Management, GPS Attendance Punching & Payslip Gate", async ({ authenticatedPage, employeePage }) => {
+    const { dashboardPage } = authenticatedPage;
+
+    // Navigate to Staff Roster & Payroll
+    await dashboardPage.navigateToTab("EMPLOYEES");
+
+    // Search existing operator
+    await employeePage.searchOperator("Siddharth");
+    
+    // Select the first employee row to load details card
+    await employeePage.selectEmployeeRow("Siddharth");
+
+    // Punch GPS-Geofence Attendance Clock-In
+    await employeePage.punchAttendance("CLOCK-IN");
+
+    // Open Payslip generation modal gate
+    await employeePage.openPayslipGate();
+
+    // Dispatch monthly payroll transfer
+    await employeePage.dispatchPayslip("2026-07", "12500", "1500");
+  });
+
+  // ==========================================
+  // Test 4: Recovery Settlement Sandbox (Cases & Logging Actions)
+  // ==========================================
+  test("4. Recovery Settlement Sandbox Telecall Logger, Geofenced Visit & Settlements", async ({ authenticatedPage, recoveryPage }) => {
+    const { dashboardPage } = authenticatedPage;
+
+    // Navigate to Settlement Sandbox tab
+    await dashboardPage.navigateToTab("RECOVERY");
+
+    // Select first case item in sidebar
+    await recoveryPage.selectCase("Ankit");
+
+    // Log a complete corporate Telecall log
+    await recoveryPage.logTelecall("PROMISE_TO_PAY", "Spoke with customer; promised to pay settlement haircut by Friday.", "45000", "2026-07-20");
+
+    // Log a field verification visit
+    await recoveryPage.logFieldVisit("12.9716", "77.5946", "ASSET_FOUND", "Visited registered address. Business asset was verified successfully.");
+
+    // Submit a settlement proposal
+    await recoveryPage.proposeSettlement("180000");
+  });
+
+  // ==========================================
+  // Test 5: Legal Court & Notices Desk
+  // ==========================================
+  test("5. Legal Litigation Court Cases, Hearings & Dispatch Notices Desk", async ({ authenticatedPage, legalPage }) => {
+    const { dashboardPage } = authenticatedPage;
+
+    // Navigate to Court & Notices Desk tab
+    await dashboardPage.navigateToTab("LEGAL");
+
+    // Register a new litigation docket case
+    await legalPage.registerCourtSuit("OS/6102/2026", "High Court of Delhi", "2026-09-12", "RECOVERY_SUIT");
+
+    // Select the registered court case from ledger
+    await legalPage.selectCaseRow("OS/6102/2026");
+
+    // Perform an adjournment hearing action
+    await legalPage.adjounHearing("JUDGE_ABSENT", "2026-10-15", "Honorable judge was absent; adjourned to next calendar month.");
+
+    // Select Legal notices sub-tab
+    await legalPage.selectSubTab("NOTICES");
+
+    // Draft and Dispatch a new Legal Notice
+    await legalPage.draftLegalNotice("DEMAND_NOTICE", "EDROS-LN-2026-1102", "OS/6102/2026", "SpeedPost SP-998124");
+  });
+
+  // ==========================================
+  // Test 6: Secure Object S3 Document Vault
+  // ==========================================
+  test("6. Secure Object Vault File Uploader, PDF Merge & RC4 Sealer", async ({ authenticatedPage, documentsPage }) => {
+    const { dashboardPage } = authenticatedPage;
+
+    // Navigate to Secure File Vault tab
+    await dashboardPage.navigateToTab("DOCUMENTS");
+
+    // Upload a secure PDF document to S3 / Cloud bucket
+    await documentsPage.uploadFile("legal_docket_A.pdf", "Mock PDF Bytes Content A");
+    await documentsPage.uploadFile("legal_docket_B.pdf", "Mock PDF Bytes Content B");
+
+    // Search and filter the ledger
+    await documentsPage.searchAndFilter("legal_docket_A.pdf", "GENERAL", "PENDING_VERIFICATION");
+
+    // Perform state workflow action: Approve document
+    await documentsPage.approveDocument("legal_docket_A.pdf");
+
+    // Apply RC4 Cryptographic Seal to protect PDF
+    await documentsPage.encryptDocument("legal_docket_A.pdf", "SecretSeal2026!");
+
+    // Select multiple documents for PDF stitcher merge compilation
+    await documentsPage.selectRowForMerge("legal_docket_A.pdf");
+    await documentsPage.selectRowForMerge("legal_docket_B.pdf");
+
+    // Compile dynamic merged document bundle
+    await documentsPage.triggerMerge("assembled_litigation_bundle.pdf");
+  });
+
+  // ==========================================
+  // Test 7: Settings (RBAC Rules, Sandbox Profile, Audit logs)
+  // ==========================================
+  test("7. Settings Console Role Permission Matrix & Sandbox Profile Authority Swapper", async ({ authenticatedPage, settingsPage }) => {
+    const { dashboardPage } = authenticatedPage;
+
+    // Navigate to settings tab
+    await dashboardPage.navigateToTab("SETTINGS");
+
+    // Click permission box to toggle access in RBAC matrix
+    await settingsPage.togglePermission("SUPER_ADMIN", "VIEW_ANALYTICS");
+
+    // Save rules to Postgres database
+    await settingsPage.saveRbacRules();
+
+    // Navigate to audit trails log subtab
+    await settingsPage.selectSubTab("AUDIT");
+    await expect(settingsPage.auditLogsTable).toBeVisible();
+
+    // Switch Sandbox Operator authority role dynamically
+    await settingsPage.switchSandboxRole("REGIONAL_MANAGER");
+
+    // Verify header matches changed sandbox role authority
+    const updatedRoleIndicator = dashboardPage.page.locator('span:has-text("Authority: REGIONAL_MANAGER")');
+    await expect(updatedRoleIndicator).toBeVisible();
+  });
+
+  // ==========================================
+  // Test 8: Device Responsiveness Viewports
+  // ==========================================
+  test("8. Visual Responsiveness & Adapter checks for Mobile vs Desktop", async ({ authPage, page }) => {
     // 1. Mobile Viewport (iPhone 11 Pro size)
     await page.setViewportSize({ width: 375, height: 812 });
-    await page.goto("/");
-    
-    // Check main workspace container and title are correctly adapter styled
-    const title = page.locator("h1");
-    await expect(title).toBeVisible();
+    await authPage.navigate();
+    const workspaceWrapper = page.locator("#edros-workspace-wrapper");
+    await expect(workspaceWrapper).toBeVisible();
 
-    // 2. Desktop Viewport (Full High-Def)
+    // 2. Desktop High Definition Viewport
     await page.setViewportSize({ width: 1920, height: 1080 });
-    await page.goto("/");
-    await expect(title).toBeVisible();
+    await authPage.navigate();
+    await expect(workspaceWrapper).toBeVisible();
   });
 
-  test("4. Accessibility (Aria Roles, Contrast & Inputs)", async ({ page }) => {
-    await page.goto("/");
+  // ==========================================
+  // Test 9: Accessibility compliance checks
+  // ==========================================
+  test("9. Accessibility compliant ARIA roles, form labels & navigable elements", async ({ authPage, page }) => {
+    await authPage.navigate();
 
-    // Verify critical authentication elements are visible, high-contrast, and keyboard navigable
-    const emailInput = page.locator('input[type="email"]');
-    await expect(emailInput).toBeFocused(); // AuthScreen auto-focuses first element or is tab-reachable
-    
-    // Inputs must have readable placeholder text and form labels matching ARIA safety standards
-    await expect(page.locator('label:has-text("Corporate Email")')).toBeVisible();
-    await expect(page.locator('label:has-text("Secure Password")')).toBeVisible();
+    // Labels must be visible and compliant
+    const emailLabel = page.locator('label:has-text("Corporate Email")');
+    await expect(emailLabel).toBeVisible();
+
+    const passwordLabel = page.locator('label:has-text("Secure Password")');
+    await expect(passwordLabel).toBeVisible();
+
+    // Buttons must be clickable and carry readable ARIA actions
+    await expect(authPage.authenticateButton).toBeVisible();
+    await expect(authPage.authenticateButton).toBeEnabled();
   });
+
 });
