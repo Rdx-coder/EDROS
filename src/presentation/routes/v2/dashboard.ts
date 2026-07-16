@@ -17,6 +17,7 @@ const router = express.Router();
 router.get(
   "/metrics",
   authorizePermission([
+    UserRole.TENANT_ADMIN,
     UserRole.RECOVERY_EXECUTIVE,
     UserRole.TEAM_LEADER,
     UserRole.BRANCH_MANAGER,

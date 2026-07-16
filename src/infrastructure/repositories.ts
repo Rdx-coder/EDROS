@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import "./dbUrlSanitizer";
 import { PrismaClient } from "@prisma/client";
 import { IDebtCaseRepository, IUserRepository, IAuditLogRepository, ITenantRepository } from "../domain/repositories";
 import { DebtCase, User, AuditLog, Tenant, UserRole } from "../types";

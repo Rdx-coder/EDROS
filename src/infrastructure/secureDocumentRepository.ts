@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import "./dbUrlSanitizer";
 import { PrismaClient } from "@prisma/client";
 import { redisCache } from "./redisClient";
 import { PinoLogger } from "./pinoLogger";

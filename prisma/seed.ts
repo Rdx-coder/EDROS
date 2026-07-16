@@ -5,6 +5,7 @@
 // Seeds production role-based access control, state boundaries, operational departments,
 // default job structures, sample branches, and mock compliance accounts.
 
+import "../src/infrastructure/dbUrlSanitizer";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();

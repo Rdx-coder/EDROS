@@ -4,6 +4,7 @@
  */
 
 import express from "express";
+import "../../../infrastructure/dbUrlSanitizer";
 import { PrismaClient } from "@prisma/client";
 import { redisCache, RedisConnectionPool } from "../../../infrastructure/redisClient";
 import { bullQueue, BullQueueManager } from "../../../infrastructure/bullQueue";
