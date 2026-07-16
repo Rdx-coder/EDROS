@@ -16,13 +16,18 @@ function createRedisClient(name: string, dbIndex: number): Redis | null {
     return null;
   }
 
+  // Detect Upstash Redis which does not support database selection (only DB 0 is valid)
+  const isUpstash = url.includes("upstash.io");
+  const actualDb = isUpstash ? 0 : dbIndex;
+
   try {
     const client = new Redis(url, {
-      db: dbIndex,
-      maxRetriesPerRequest: 3,
+      db: actualDb,
+      maxRetriesPerRequest: null,
+      enableOfflineQueue: false,
       retryStrategy: (times) => {
         PinoLogger.warn(`${name} Redis retry attempt #${times}`);
-        return Math.min(times * 100, 2000);
+        return Math.min(times * 500, 5000);
       },
       reconnectOnError: (err) => {
         PinoLogger.warn(`${name} Redis reconnecting on error: ${err.message}`);
@@ -31,11 +36,20 @@ function createRedisClient(name: string, dbIndex: number): Redis | null {
     });
 
     client.on("connect", () => {
-      PinoLogger.info(`${name} Redis connected successfully to DB index ${dbIndex}`);
+      PinoLogger.info(`${name} Redis connected successfully to DB index ${actualDb}`);
     });
 
     client.on("error", (err) => {
-      PinoLogger.error(`${name} Redis client connection error:`, err);
+      const isTransient = err.message.includes("ECONNRESET") ||
+                          err.message.includes("ETIMEDOUT") ||
+                          err.message.includes("EPIPE") ||
+                          err.message.includes("MaxRetriesPerRequestError") ||
+                          err.message.includes("closed");
+      if (isTransient) {
+        PinoLogger.warn(`${name} Redis transient connection warning: ${err.message}`);
+      } else {
+        PinoLogger.error(`${name} Redis client connection error:`, err);
+      }
     });
 
     return client;
