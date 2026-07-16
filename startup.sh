@@ -9,7 +9,6 @@
     # Apply pending database migrations
     if [[ -n "${DATABASE_URL:-}" ]]; then
       echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] [INFO] Applying database migrations..."
-      node scripts/pre-prisma-debug.js
       npx prisma migrate deploy
     else
       echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] [WARNING] DATABASE_URL is unset. Skipping automatic migrations."
