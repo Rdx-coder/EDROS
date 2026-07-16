@@ -5,6 +5,7 @@ FROM node:20-alpine AS builder
 WORKDIR /usr/src/app
 
 COPY package*.json ./
+COPY prisma ./prisma/
 RUN npm ci
 
 COPY . .
@@ -18,11 +19,17 @@ RUN addgroup -g 1001 -S nodejs && \
     adduser -u 1001 -S nodejs -G nodejs
 
 COPY --chown=nodejs:nodejs package*.json ./
+COPY --chown=nodejs:nodejs prisma ./prisma/
 RUN npm ci --only=production
+
+# Explicitly generate Prisma Client to ensure it is built in the runner stage with correct binary engine
+RUN npx prisma generate
 
 # Copy built code to output
 COPY --chown=nodejs:nodejs --from=builder /usr/src/app/dist ./dist
-COPY --chown=nodejs:nodejs --from=builder /usr/src/app/prisma ./prisma
+
+# Recursively change ownership of application folder to non-root user
+RUN chown -R nodejs:nodejs /usr/src/app
 
 USER nodejs
 

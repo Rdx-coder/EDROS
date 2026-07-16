@@ -28,18 +28,22 @@ ENV PORT=3000
 # Create secure system group and user
 RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
 
-# Copy package definitions and prisma schema to run production generation
+# Copy package definitions, prisma schema, and startup helper
 COPY package*.json ./
 COPY prisma ./prisma/
+COPY startup.sh ./
 
 # Install ONLY production dependencies (triggers prisma generate automatically via postinstall)
 RUN npm ci --only=production
+
+# Explicitly generate Prisma Client to ensure it is built in the runner stage with correct binary engine
+RUN npx prisma generate
 
 # Copy compiled bundles and assets from the builder stage
 COPY --from=builder /app/dist ./dist
 
 # Give ownership of application folder to non-root user
-RUN chown -R nextjs:nodejs /app
+RUN chown -R nextjs:nodejs /app && chmod +x ./startup.sh
 
 # Switch to standard unprivileged user
 USER nextjs
@@ -47,5 +51,5 @@ USER nextjs
 # Expose ingress routing port
 EXPOSE 3000
 
-# Run pending migrations and start compiled CommonJS server bundle
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/server.cjs"]
+# Run pending migrations and start compiled CommonJS server bundle using startup script
+CMD ["sh", "./startup.sh"]
