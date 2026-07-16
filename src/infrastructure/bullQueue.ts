@@ -249,6 +249,26 @@ export class BullQueueManager {
     PinoLogger.info("[Graceful Shutdown] All queue workers successfully halted.");
   }
 
+  /**
+   * Purge all jobs from memory and Redis hash keys
+   */
+  public async clearQueue(): Promise<void> {
+    this.jobs.clear();
+    this.dlq = [];
+    if (this.client && this.client.status === "ready") {
+      try {
+        await this.client.del("bullmq:jobs");
+        const keys = await this.client.keys("bullmq:queue:*");
+        if (keys.length > 0) {
+          await this.client.del(...keys);
+        }
+      } catch (err) {
+        PinoLogger.error("Failed to clear Redis bullmq job stores", err);
+      }
+    }
+    PinoLogger.warn("[Queue Purge] All background jobs have been explicitly flushed from memory and Redis ledger stores.");
+  }
+
   private triggerProcessing() {
     if (this.isProcessing || this.isShuttingDown) return;
     this.startWorkerLoop();

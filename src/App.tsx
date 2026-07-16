@@ -25,7 +25,8 @@ import {
   Landmark,
   Scale,
   PhoneCall,
-  UserCheck
+  UserCheck,
+  Terminal
 } from "lucide-react";
 
 import FolderExplorer from "./components/FolderExplorer";
@@ -46,10 +47,11 @@ import LegalCourtView from "./components/edros/LegalCourtView";
 import DocumentsView from "./components/edros/DocumentsView";
 import SettingsView from "./components/edros/SettingsView";
 import WorkflowConsoleView from "./components/edros/WorkflowConsoleView";
+import DevOpsCenterView from "./components/edros/DevOpsCenterView";
 
 type ActiveTab = "EXPLORER" | "DIAGRAM" | "HIERARCHY" | "TRACE" | "DI_SANDBOX" | "RBAC" | "EXPORTER";
 type ConsoleMode = "OPERATIONS" | "ARCHITECTURE";
-type OperationsTab = "DASHBOARD" | "ORGANIZATION" | "EMPLOYEES" | "DEBTORS" | "RECOVERY" | "LEGAL" | "DOCUMENTS" | "SETTINGS" | "WORKFLOWS";
+type OperationsTab = "DASHBOARD" | "ORGANIZATION" | "EMPLOYEES" | "DEBTORS" | "RECOVERY" | "LEGAL" | "DOCUMENTS" | "SETTINGS" | "WORKFLOWS" | "DEVELOPER_OPS";
 
 interface HealthCheckData {
   status: string;
@@ -292,6 +294,17 @@ export default function App() {
                     >
                       <Cpu className="w-4 h-4" /> Workflows & Engines
                     </button>
+
+                    <button
+                      onClick={() => setOperationsTab("DEVELOPER_OPS")}
+                      className={`px-3 py-1.5 text-xs font-bold border-2 border-brand-dark-bg font-mono flex items-center gap-1.5 transition-all cursor-pointer ${
+                        operationsTab === "DEVELOPER_OPS"
+                          ? "bg-brand-dark-bg text-white"
+                          : "bg-white text-brand-dark-bg hover:bg-gray-100"
+                      }`}
+                    >
+                      <Terminal className="w-4 h-4 text-red-600" /> Developer Ops (DOC)
+                    </button>
                   </div>
                 </div>
 
@@ -316,6 +329,13 @@ export default function App() {
                     />
                   )}
                   {operationsTab === "WORKFLOWS" && <WorkflowConsoleView token={user.token} />}
+                  {operationsTab === "DEVELOPER_OPS" && (
+                    <DevOpsCenterView
+                      token={user.token}
+                      operatorRole={user.role}
+                      operatorEmail={user.email}
+                    />
+                  )}
                 </div>
               </div>
             )}

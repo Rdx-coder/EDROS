@@ -21,6 +21,7 @@ import authRouter from "./auth";
 import monitoringRouter from "./monitoring";
 import testingRouter from "./testing";
 import documentsRouter from "./documents";
+import docRouter from "./doc";
 
 const router = express.Router();
 
@@ -101,6 +102,7 @@ router.use("/workflows", workflowsRouter);
 router.use("/monitoring", monitoringRouter);
 router.use("/testing", testingRouter);
 router.use("/documents", documentsRouter);
+router.use("/doc", docRouter);
 
 /**
  * 1. GET: Swagger OpenAPI Spec JSON Endpoint

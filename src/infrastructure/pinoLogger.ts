@@ -24,6 +24,8 @@ export const traceStore = new AsyncLocalStorage<TraceContext>();
  * Correlates context automatically and formats logs in standardized JSON structures.
  */
 export class PinoLogger {
+  public static logsRingBuffer: any[] = [];
+
   private static getContext(): TraceContext {
     return traceStore.getStore() || {};
   }
@@ -49,6 +51,12 @@ export class PinoLogger {
       sessionId: ctx.sessionId || "sess-system",
       metadata: meta ? this.sanitizeMeta(meta) : undefined,
     };
+
+    PinoLogger.logsRingBuffer.push(logObj);
+    if (PinoLogger.logsRingBuffer.length > 2000) {
+      PinoLogger.logsRingBuffer.shift();
+    }
+
     return JSON.stringify(logObj);
   }
 
