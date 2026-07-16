@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import "dotenv/config";
+
 function sanitizeDatabaseUrl(url: string | undefined): string | undefined {
   if (!url) return url;
   try {
