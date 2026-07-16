@@ -4,10 +4,11 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 
-# Copy dependency specifications
+# Copy dependency specifications and Prisma schema for build-time generation
 COPY package*.json tsconfig.json vite.config.ts ./
+COPY prisma ./prisma/
 
-# Install packages
+# Install packages (triggers prisma generate automatically via postinstall)
 RUN npm ci
 
 # Copy full application codebase
@@ -27,8 +28,11 @@ ENV PORT=3000
 # Create secure system group and user
 RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
 
-# Copy package definitions and install ONLY production dependencies to minimize attack surface
+# Copy package definitions and prisma schema to run production generation
 COPY package*.json ./
+COPY prisma ./prisma/
+
+# Install ONLY production dependencies (triggers prisma generate automatically via postinstall)
 RUN npm ci --only=production
 
 # Copy compiled bundles and assets from the builder stage
@@ -43,5 +47,5 @@ USER nextjs
 # Expose ingress routing port
 EXPOSE 3000
 
-# Start compiled CommonJS server bundle
-CMD ["node", "dist/server.cjs"]
+# Run pending migrations and start compiled CommonJS server bundle
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/server.cjs"]

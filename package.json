@@ -6,14 +6,13 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "postinstall": "prisma generate",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test",
-    "deploy": "npm run build && wrangler deploy",
-    "preview": "npm run build && wrangler dev"
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1086.0",
@@ -36,7 +35,6 @@
     "vite": "^6.2.3"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.45.0",
     "@playwright/test": "^1.61.1",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
@@ -50,7 +48,6 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
-    "vitest": "^4.1.10",
-    "wrangler": "^4.111.0"
+    "vitest": "^4.1.10"
   }
 }
